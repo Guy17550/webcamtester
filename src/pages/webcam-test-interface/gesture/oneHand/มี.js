@@ -1,16 +1,11 @@
-/**
- * Gesture: มี
- * EASY-TRIGGER & PREDICTIVE VERSION
- */
-
 const CONFIG = {
-  // ความแม่นยำของรูปมือ (ยิ่งน้อยยิ่งติดง่าย)
-  FIST_CONFIDENCE: 0.22, 
+  // ค่าความห่างเฉลี่ยของนิ้ว (ปรับให้กว้างขึ้นเพื่อให้ติดง่าย ไม่ต้องกำแน่น)
+  HAND_OPENNESS_THRESHOLD: 0.25, 
   
-  // ระยะเคลื่อนที่ขั้นต่ำที่ใช้ "เดา" ว่ากำลังทำท่าอยู่
-  GESTURE_THRESHOLD: 0.03,
+  // ระยะเคลื่อนที่ที่ระบบจะเริ่ม "เดา" ว่าเป็นท่า "มี"
+  PREDICTIVE_MOVE: 0.02,
 
-  MAX_FRAMES: 50,
+  MAX_FRAMES: 60,
 };
 
 let state = 'idle';
@@ -23,13 +18,12 @@ const reset = () => {
   frameCount = 0;
 };
 
-// เช็คว่ารูปมือ "ใกล้เคียง" การกำหมัดหรือไม่
-const isFistPredictive = (hand) => {
-  const wrist = hand[0];
-  const tips = [8, 12, 16, 20];
-  // หาค่าเฉลี่ยความห่างของนิ้ว ถ้าส่วนใหญ่หดเข้าหาฝ่ามือ ถือว่าผ่าน
-  const avgDist = tips.reduce((sum, t) => sum + Math.hypot(hand[t].x - wrist.x, hand[t].y - wrist.y), 0) / 4;
-  return avgDist < CONFIG.FIST_CONFIDENCE;
+// เช็คว่ามือมีการ "รวบนิ้ว" เข้าหาหลังมือ (จุดที่ 9) หรือไม่
+const isHandClustered = (hand) => {
+  const center = hand[9]; // ใช้หลังมือเป็นศูนย์กลาง
+  const fingers = [4, 8, 12, 16, 20]; // ปลายนิ้วทุกนิ้ว
+  const avgDist = fingers.reduce((sum, f) => sum + Math.hypot(hand[f].x - center.x, hand[f].y - center.y), 0) / 5;
+  return avgDist < CONFIG.HAND_OPENNESS_THRESHOLD;
 };
 
 export function analyze(results, previousLandmarks) {
@@ -39,7 +33,7 @@ export function analyze(results, previousLandmarks) {
   }
 
   const hand = results.multiHandLandmarks[0];
-  const point = hand[9]; // ใช้หลังมือเป็นจุดหลัก
+  const point = hand[9]; 
 
   frameCount++;
   if (frameCount > CONFIG.MAX_FRAMES) {
@@ -47,31 +41,29 @@ export function analyze(results, previousLandmarks) {
     return { event: 'none', previousLandmarks: hand };
   }
 
-  /* 1. เช็ครูปมือเบื้องต้น (เดาจากกำหมัด) */
-  const handMatch = isFistPredictive(hand);
+  const handMatch = isHandClustered(hand);
 
-  /* 2. บันทึกจุดเริ่มต้น */
   if (!startPos) {
     startPos = { x: point.x, y: point.y };
     return { event: 'none', previousLandmarks: hand };
   }
 
-  const movementY = point.y - startPos.y;
-  const totalMovement = Math.hypot(point.x - startPos.x, point.y - startPos.y);
+  // ดูการเคลื่อนที่สะสม
+  const diffY = point.y - startPos.y;
+  const totalDist = Math.hypot(point.x - startPos.x, point.y - startPos.y);
 
-  /* 3. Logic การเดาและตัดสิน (Prediction Logic) */
   if (state === 'idle') {
-    // ถ้ากำมือ และเริ่มขยับนิดเดียว (เข้าสู่ Tracking ทันที)
-    if (handMatch && totalMovement > 0.01) {
+    // ถ้ามือรวบ และมีการขยับเพียงเล็กน้อย (Predictive Start)
+    if (handMatch && totalDist > 0.01) {
       state = 'tracking';
       return { event: 'progress', previousLandmarks: hand };
     }
   }
 
   if (state === 'tracking') {
-    // จังหวะเดา: ถ้ายังกำมืออยู่ และมีการเลื่อนมือลง (Y เพิ่ม) 
-    // หรือมีการขยับที่ชัดเจนในระยะสั้นๆ ให้ตัดสินว่าเป็นท่า "มี" เลย
-    if (handMatch && (movementY > CONFIG.GESTURE_THRESHOLD || totalMovement > CONFIG.GESTURE_THRESHOLD * 1.5)) {
+    // ระบบเดา: ถ้ายังรวบมืออยู่ และมือเคลื่อนที่ลง (diffY > 0) หรือขยับเกินเกณฑ์
+    // เราจะตัดสินว่าคือท่า "มี" ทันทีโดยไม่ต้องรอให้จบกระบวนการสะบัด
+    if (handMatch && (diffY > CONFIG.PREDICTIVE_MOVE || totalDist > CONFIG.PREDICTIVE_MOVE * 1.5)) {
       reset();
       return {
         event: 'finished',
