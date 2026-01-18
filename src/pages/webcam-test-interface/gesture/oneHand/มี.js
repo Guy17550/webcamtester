@@ -1,6 +1,6 @@
 const CONFIG = {
-  VELOCITY_THRESHOLD: 0.01,
-  MAX_FRAMES: 25,
+  VELOCITY_THRESHOLD: 0.02,
+  MAX_FRAMES: 20,
 };
 
 let state = 'idle';
@@ -20,7 +20,7 @@ export function analyze(results, previousLandmarks) {
   }
 
   const hand = results.multiHandLandmarks[0];
-  const point = hand[8]; 
+  const point = hand[12]; // fingertip
 
   if (!lastPos) {
     lastPos = point;
@@ -53,6 +53,9 @@ export function analyze(results, previousLandmarks) {
       previousLandmarks: hand,
     };
   }
+
+  return { event: 'none', previousLandmarks: hand };
+}
 
   return { event: 'none', previousLandmarks: hand };
 }
