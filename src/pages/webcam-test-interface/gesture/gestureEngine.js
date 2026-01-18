@@ -2,7 +2,7 @@
 
 import * as กลับ from './oneHand/กลับ.js';
 import * as กิน from './oneHand/กิน.js';
-
+import * as มี from './oneHand/มี.js';
 /**
  * SAFE / INTENT-AWARE GESTURE ENGINE (STABLE VERSION)
  *
@@ -14,7 +14,7 @@ import * as กิน from './oneHand/กิน.js';
  * - มือออกเฟรม = reset ทั้งหมด
  */
 
-const gestures = [กลับ, กิน];
+const gestures = [กลับ, กิน, ,มี];
 
 // lifecycle
 let gestureState = 'idle'; // idle | tracking | confirmed | ended
