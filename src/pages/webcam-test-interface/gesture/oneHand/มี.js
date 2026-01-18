@@ -1,43 +1,37 @@
 const CONFIG = {
-  MOVE_DISTANCE_THRESHOLD: 0.03, // ระยะรวม (ปรับง่าย)
-  MAX_FRAMES: 60,
+  VELOCITY_THRESHOLD: 0.003,
+  MAX_FRAMES: 50,
 };
 
 let state = 'idle';
-let startPos = null;
 let lastPos = null;
 let frameCount = 0;
-let totalDistance = 0;
 
 const reset = () => {
   state = 'idle';
-  startPos = null;
   lastPos = null;
   frameCount = 0;
-  totalDistance = 0;
 };
 
-export function analyze(results) {
+export function analyze(results, previousLandmarks) {
   if (!results?.multiHandLandmarks || results.multiHandLandmarks.length !== 1) {
     reset();
     return { event: 'none' };
   }
 
   const hand = results.multiHandLandmarks[0];
-  const point = hand[9]; // โคนนิ้วกลาง
+  const point = hand[9]; // ใช้หลังมือแทนปลายนิ้ว
 
-  if (!startPos) {
-    startPos = point;
+  if (!lastPos) {
     lastPos = point;
     return { event: 'none', previousLandmarks: hand };
   }
 
-  const delta = Math.hypot(
+  const velocity = Math.hypot(
     point.x - lastPos.x,
     point.y - lastPos.y
   );
 
-  totalDistance += delta;
   lastPos = point;
   frameCount++;
 
@@ -46,12 +40,12 @@ export function analyze(results) {
     return { event: 'none', previousLandmarks: hand };
   }
 
-  if (state === 'idle' && totalDistance > CONFIG.MOVE_DISTANCE_THRESHOLD * 0.3) {
+  if (state === 'idle' && velocity > CONFIG.VELOCITY_THRESHOLD) {
     state = 'tracking';
     return { event: 'progress', previousLandmarks: hand };
   }
 
-  if (state === 'tracking' && totalDistance > CONFIG.MOVE_DISTANCE_THRESHOLD) {
+  if (state === 'tracking' && velocity > CONFIG.VELOCITY_THRESHOLD * 1.1) {
     reset();
     return {
       event: 'finished',
