@@ -1,5 +1,5 @@
 const CONFIG = {
-  VELOCITY_THRESHOLD: 0.005,
+  VELOCITY_THRESHOLD: 0.004,
   MAX_FRAMES: 40,
 };
 
@@ -20,7 +20,8 @@ export function analyze(results, previousLandmarks) {
   }
 
   const hand = results.multiHandLandmarks[0];
-  const point = hand[12]; // fingertip
+  // เปลี่ยนจาก hand[12] เป็น hand[9] (โคนนิ้วกลาง/หลังมือ) เพื่อให้กล้องจับได้แม่นยำตลอดเวลา
+  const point = hand[9]; 
 
   if (!lastPos) {
     lastPos = point;
