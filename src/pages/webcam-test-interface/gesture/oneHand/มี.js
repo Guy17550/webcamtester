@@ -1,6 +1,6 @@
 const CONFIG = {
-  VELOCITY_THRESHOLD: 0.008,
-  MAX_FRAMES: 20,
+  VELOCITY_THRESHOLD: 0.005,
+  MAX_FRAMES: 40,
 };
 
 let state = 'idle';
@@ -45,7 +45,7 @@ export function analyze(results, previousLandmarks) {
     return { event: 'progress', previousLandmarks: hand };
   }
 
-  if (state === 'tracking' && velocity > CONFIG.VELOCITY_THRESHOLD * 1.5) {
+  if (state === 'tracking' && velocity > CONFIG.VELOCITY_THRESHOLD * 1.2) {
     reset();
     return {
       event: 'finished',
