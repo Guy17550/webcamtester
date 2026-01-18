@@ -1,28 +1,35 @@
 /**
  * Gesture: มี
- * DISPLACEMENT-BASED (ใช้หลักการเดียวกับท่ากินแต่เป็นแนวตั้ง)
+ * EASY-TRIGGER & PREDICTIVE VERSION
  */
 
 const CONFIG = {
-  // ระยะการเคลื่อนที่ลงที่ต้องทำได้ (Displacement)
-  MIN_DRAG_DOWN: 0.08, 
+  // ความแม่นยำของรูปมือ (ยิ่งน้อยยิ่งติดง่าย)
+  FIST_CONFIDENCE: 0.22, 
+  
+  // ระยะเคลื่อนที่ขั้นต่ำที่ใช้ "เดา" ว่ากำลังทำท่าอยู่
+  GESTURE_THRESHOLD: 0.03,
 
-  // ความเร็วขั้นต่ำที่ยอมรับ (กันมือสั่น)
-  MOVE_THRESHOLD: 0.002,
-
-  MAX_FRAMES: 40,
+  MAX_FRAMES: 50,
 };
 
-let state = 'idle'; // idle | tracking
-let startY = null;
+let state = 'idle';
+let startPos = null;
 let frameCount = 0;
-let lastY = null;
 
 const reset = () => {
   state = 'idle';
-  startY = null;
-  lastY = null;
+  startPos = null;
   frameCount = 0;
+};
+
+// เช็คว่ารูปมือ "ใกล้เคียง" การกำหมัดหรือไม่
+const isFistPredictive = (hand) => {
+  const wrist = hand[0];
+  const tips = [8, 12, 16, 20];
+  // หาค่าเฉลี่ยความห่างของนิ้ว ถ้าส่วนใหญ่หดเข้าหาฝ่ามือ ถือว่าผ่าน
+  const avgDist = tips.reduce((sum, t) => sum + Math.hypot(hand[t].x - wrist.x, hand[t].y - wrist.y), 0) / 4;
+  return avgDist < CONFIG.FIST_CONFIDENCE;
 };
 
 export function analyze(results, previousLandmarks) {
@@ -32,17 +39,7 @@ export function analyze(results, previousLandmarks) {
   }
 
   const hand = results.multiHandLandmarks[0];
-  // ใช้จุดที่ 9 (หลังมือ) เพราะเสถียรที่สุดจากรูปที่คุณส่งมา
-  const currentY = hand[9].y; 
-
-  if (lastY === null) {
-    lastY = currentY;
-    return { event: 'none', previousLandmarks: hand };
-  }
-
-  // คำนวณความเร็วแนวตั้ง (บวกคือลง ลบคือขึ้น)
-  const velocityY = currentY - lastY;
-  lastY = currentY;
+  const point = hand[9]; // ใช้หลังมือเป็นจุดหลัก
 
   frameCount++;
   if (frameCount > CONFIG.MAX_FRAMES) {
@@ -50,23 +47,31 @@ export function analyze(results, previousLandmarks) {
     return { event: 'none', previousLandmarks: hand };
   }
 
-  /* ---------- IDLE ---------- */
-  if (state === 'idle') {
-    // ถ้าเริ่มขยับมือลง (velocityY เป็นบวก)
-    if (velocityY > CONFIG.MOVE_THRESHOLD) {
-      state = 'tracking';
-      startY = currentY;
-      return { event: 'progress', previousLandmarks: hand };
-    }
+  /* 1. เช็ครูปมือเบื้องต้น (เดาจากกำหมัด) */
+  const handMatch = isFistPredictive(hand);
+
+  /* 2. บันทึกจุดเริ่มต้น */
+  if (!startPos) {
+    startPos = { x: point.x, y: point.y };
     return { event: 'none', previousLandmarks: hand };
   }
 
-  /* ---------- TRACKING ---------- */
-  if (state === 'tracking') {
-    const totalDisplacement = currentY - startY;
+  const movementY = point.y - startPos.y;
+  const totalMovement = Math.hypot(point.x - startPos.x, point.y - startPos.y);
 
-    // เงื่อนไขสำเร็จ: ขยับมือลงมาได้ระยะที่กำหนด
-    if (totalDisplacement > CONFIG.MIN_DRAG_DOWN) {
+  /* 3. Logic การเดาและตัดสิน (Prediction Logic) */
+  if (state === 'idle') {
+    // ถ้ากำมือ และเริ่มขยับนิดเดียว (เข้าสู่ Tracking ทันที)
+    if (handMatch && totalMovement > 0.01) {
+      state = 'tracking';
+      return { event: 'progress', previousLandmarks: hand };
+    }
+  }
+
+  if (state === 'tracking') {
+    // จังหวะเดา: ถ้ายังกำมืออยู่ และมีการเลื่อนมือลง (Y เพิ่ม) 
+    // หรือมีการขยับที่ชัดเจนในระยะสั้นๆ ให้ตัดสินว่าเป็นท่า "มี" เลย
+    if (handMatch && (movementY > CONFIG.GESTURE_THRESHOLD || totalMovement > CONFIG.GESTURE_THRESHOLD * 1.5)) {
       reset();
       return {
         event: 'finished',
@@ -74,17 +79,6 @@ export function analyze(results, previousLandmarks) {
         previousLandmarks: hand,
       };
     }
-
-    // ถ้าเปลี่ยนทิศทาง (ขยับขึ้น) ให้ reset เพื่อป้องกันการติดมั่ว
-    if (velocityY < -0.01) {
-      reset();
-    }
-
-    return { 
-      event: 'progress', 
-      previousLandmarks: hand,
-      debug: { totalDisplacement } 
-    };
   }
 
   return { event: 'none', previousLandmarks: hand };
