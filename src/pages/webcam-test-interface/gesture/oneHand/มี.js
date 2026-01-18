@@ -1,5 +1,5 @@
 const CONFIG = {
-  VELOCITY_THRESHOLD: 0.02,
+  VELOCITY_THRESHOLD: 0.008,
   MAX_FRAMES: 20,
 };
 
@@ -49,13 +49,10 @@ export function analyze(results, previousLandmarks) {
     reset();
     return {
       event: 'finished',
-      word: 'กิน',
+      word: 'มี',
       previousLandmarks: hand,
     };
   }
-
-  return { event: 'none', previousLandmarks: hand };
-}
 
   return { event: 'none', previousLandmarks: hand };
 }
