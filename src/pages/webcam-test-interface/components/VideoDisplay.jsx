@@ -1,16 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
-
 import { analyzeGesture } from "../gesture/gestureEngine";
 
-// 🔹 sentence layer (SINGLE SOURCE OF TRUTH)
+// sentence layer
 import {
   acceptWord,
-  getSentenceState,
   resetSentence,
   undoLastWord,
   pauseSentence,
   resumeSentence,
   confirmSentence,
+  getSentenceState,
 } from "../gesture/sentenceEngine";
 
 const COOLDOWN_MS = 400;
@@ -19,36 +18,32 @@ const VideoDisplay = ({ videoRef, isActive }) => {
   const canvasRef = useRef(null);
   const handsRef = useRef(null);
   const rafRef = useRef(null);
-
   const prevLandmarksRef = useRef(null);
   const cooldownUntilRef = useRef(0);
 
   // UI state
   const [detectedWord, setDetectedWord] = useState("");
   const [gestureStatus, setGestureStatus] = useState("กำลังตรวจจับ...");
-  const [sentenceText, setSentenceText] = useState("");
+  const [sentenceState, setSentenceState] = useState(getSentenceState());
   const [isPaused, setIsPaused] = useState(false);
   const [isConfirmed, setIsConfirmed] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
 
-  /* =========================
-     🔊 TEXT TO SPEECH
-  ========================= */
+  /* =====================
+     SPEAK SENTENCE
+  ===================== */
   const speakSentence = () => {
-    if (!sentenceText) return;
-
-    const utterance = new SpeechSynthesisUtterance(sentenceText);
+    if (!sentenceState.formatted) return;
+    const utterance = new SpeechSynthesisUtterance(sentenceState.formatted);
     utterance.lang = "th-TH";
     utterance.rate = 0.9;
-    utterance.pitch = 1.0;
-
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   };
 
-  /* =========================
-     MAIN EFFECT
-  ========================= */
+  /* =====================
+     CAMERA + GESTURE LOOP
+  ===================== */
   useEffect(() => {
     if (!isActive || !videoRef?.current) return;
 
@@ -63,10 +58,7 @@ const VideoDisplay = ({ videoRef, isActive }) => {
     };
 
     const drawHand = (hand) => {
-      ctx.fillStyle = "#00ff00";
-      ctx.strokeStyle = "#00ff00";
-      ctx.lineWidth = 2;
-
+      ctx.fillStyle = "#38bdf8";
       hand.forEach((p) => {
         ctx.beginPath();
         ctx.arc(
@@ -96,37 +88,22 @@ const VideoDisplay = ({ videoRef, isActive }) => {
 
       const state = result?.gestureState;
 
-      /* ---------- STATE UI ---------- */
       if (state === "idle") {
         setGestureStatus("กำลังตรวจจับ...");
         setDetectedWord("");
-      }
-
-      else if (state === "tracking") {
+      } else if (state === "tracking") {
         setGestureStatus("กำลังติดตาม...");
-      }
-
-      else if (state === "confirmed") {
+      } else if (state === "confirmed") {
         setGestureStatus("ยืนยันแล้ว");
 
         if (result?.detectedWord && !isPaused && !isConfirmed) {
           acceptWord(result.detectedWord);
-
-          // ✅ อ่าน sentence จาก sentenceEngine เท่านั้น
-          const sentenceState = getSentenceState();
-          setSentenceText(sentenceState.formatted);
-
+          setSentenceState(getSentenceState());
           setDetectedWord(result.detectedWord);
           cooldownUntilRef.current = Date.now() + COOLDOWN_MS;
         }
-      }
-
-      else if (state === "ended") {
+      } else if (state === "ended") {
         setGestureStatus("เสร็จสิ้น");
-      }
-
-      if (result?.detectedWord === null && state === "idle") {
-        setDetectedWord("");
       }
     };
 
@@ -161,42 +138,63 @@ const VideoDisplay = ({ videoRef, isActive }) => {
     };
   }, [isActive, videoRef, isPaused, isConfirmed]);
 
-  /* =========================
+  /* =====================
      UI
-  ========================= */
+  ===================== */
   return (
-    <div>
-      <div className="relative">
+    <div className="relative h-screen bg-gradient-to-b from-blue-900 to-blue-800 text-white flex flex-col">
+      
+      {/* CAMERA (compact for mobile) */}
+      <div className="relative w-full h-[220px] md:h-[360px] overflow-hidden">
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
-          className="w-full"
+          className="w-full h-full object-cover"
         />
         <canvas
           ref={canvasRef}
-          className="absolute top-0 left-0 w-full h-full"
+          className="absolute inset-0"
           style={{ pointerEvents: "none" }}
         />
       </div>
 
-      <div className="mt-3 text-sm">
-        สถานะ: <b>{gestureStatus}</b>
+      {/* CONTENT */}
+      <div className="flex-1 px-4 py-3 overflow-y-auto pb-28">
+        <div className="text-sm text-blue-200">
+          สถานะ: <b>{gestureStatus}</b>
+        </div>
+
+        <div className="text-4xl font-bold text-cyan-300 mt-3">
+          {detectedWord || "—"}
+        </div>
+
+        {/* Sentence bubbles */}
+        <div className="mt-5 flex flex-wrap gap-2">
+          {sentenceState.sentence.length === 0 && (
+            <span className="opacity-50">ยังไม่มีคำ</span>
+          )}
+          {sentenceState.sentence.map((word, idx) => (
+            <span
+              key={idx}
+              className={`px-3 py-1 rounded-full text-sm font-semibold
+                ${
+                  idx === sentenceState.sentence.length - 1
+                    ? "bg-cyan-500 text-black shadow-lg shadow-cyan-400/50"
+                    : "bg-blue-700"
+                }`}
+            >
+              {word}
+            </span>
+          ))}
+        </div>
       </div>
 
-      <div className="text-4xl font-bold mt-4 text-green-600">
-        {detectedWord || "—"}
-      </div>
-
-      <div className="text-xl mt-4">
-        ประโยค: <b>{sentenceText || "—"}</b>
-      </div>
-
-      {/* CONTROLS */}
-      <div className="mt-4 flex gap-2 flex-wrap">
+      {/* BOTTOM BAR */}
+      <div className="fixed bottom-0 left-0 right-0 bg-blue-950/95 border-t border-blue-700 px-3 py-3 flex gap-2 justify-between">
         <button
-          className="px-4 py-2 bg-yellow-500 text-white rounded"
+          className="px-3 py-2 bg-yellow-500 text-black rounded"
           onClick={() => {
             if (isPaused) {
               resumeSentence();
@@ -211,17 +209,25 @@ const VideoDisplay = ({ videoRef, isActive }) => {
         </button>
 
         <button
-          className="px-4 py-2 bg-blue-500 text-white rounded"
+          className="px-3 py-2 bg-blue-500 rounded"
           onClick={() => {
             undoLastWord();
-            setSentenceText(getSentenceState().formatted);
+            setSentenceState(getSentenceState());
           }}
         >
-          Undo คำล่าสุด
+          Undo
         </button>
 
         <button
-          className="px-4 py-2 bg-green-600 text-white rounded"
+          className="px-3 py-2 bg-purple-600 rounded"
+          onClick={speakSentence}
+          disabled={!sentenceState.formatted}
+        >
+          🔊
+        </button>
+
+        <button
+          className="px-4 py-2 bg-green-600 rounded font-bold"
           onClick={() => {
             const result = confirmSentence();
             if (result.confirmed) {
@@ -230,32 +236,25 @@ const VideoDisplay = ({ videoRef, isActive }) => {
             }
           }}
         >
-          ยืนยันประโยค
+          Confirm
         </button>
 
         <button
-          className="px-4 py-2 bg-red-500 text-white rounded"
+          className="px-3 py-2 bg-red-600 rounded"
           onClick={() => {
             resetSentence();
-            setSentenceText("");
+            setSentenceState(getSentenceState());
             setIsPaused(false);
             setIsConfirmed(false);
           }}
         >
-          ลบคำทั้งหมด
-        </button>
-
-        <button
-          className="px-4 py-2 bg-purple-600 text-white rounded"
-          onClick={speakSentence}
-          disabled={!sentenceText}
-        >
-          🔊 อ่านประโยค
+          Reset
         </button>
       </div>
 
+      {/* DEBUG */}
       {debugInfo && (
-        <pre className="mt-3 text-xs bg-gray-100 p-2 rounded">
+        <pre className="absolute top-2 right-2 text-xs bg-black/50 p-2 rounded max-w-xs overflow-auto">
           {JSON.stringify(debugInfo, null, 2)}
         </pre>
       )}
