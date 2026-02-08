@@ -1,35 +1,36 @@
 /**
- * Gesture: กิน (v2)
- * VELOCITY-BASED (EASY BUT SAFE)
+ * Gesture: กิน (v4.1 - INTENT TIGHT)
  *
  * Pattern (1 bite):
- *  - มือเคลื่อน "เข้าใกล้ปาก" ด้วย velocity เป็นลบ
- *  - ความเร็วลดลง / หยุด (pause สั้น ๆ)
- *  - มือเคลื่อน "ออกจากปาก" ด้วย velocity เป็นบวก
+ *  - มือเข้าใกล้ปาก
+ *  - ค้างใกล้ปากจริง (hold)
+ *  - ถอยออกจากปาก
  *
  * ต้องครบ 2 bites
  */
 
 const CONFIG = {
-  // ระยะอ้างอิงปาก
-  NEAR_DISTANCE: 0.15,
+  // ระยะใกล้ปาก (แคบลง กันมั่ว)
+  NEAR_DISTANCE: 0.13,
 
-  // velocity thresholds
-  IN_VELOCITY: -0.0025,   // เข้าใกล้ปากจริง
-  OUT_VELOCITY: 0.0025,   // ถอยออกจริง
+  // velocity ใช้เป็นตัวช่วย ไม่ใช่ตัวตัด
+  IN_VELOCITY: -0.0035,
+  OUT_VELOCITY: 0.0035,
 
-  // pause (กันแกว่ง)
+  // 🔑 สำคัญที่สุด
+  HOLD_NEAR_FRAMES: 3,   // ต้องค้างใกล้ปากจริง
   PAUSE_FRAMES: 2,
 
   REQUIRED_BITES: 2,
-  MAX_FRAMES: 70,
+  MAX_FRAMES: 90,
 };
 
-let state = 'idle'; // idle | in | pause | out
+let state = 'idle'; // idle | near | pause | out
 let biteCount = 0;
 let frameCount = 0;
 
 let lastDistance = null;
+let nearCounter = 0;
 let pauseCounter = 0;
 
 const reset = () => {
@@ -37,13 +38,14 @@ const reset = () => {
   biteCount = 0;
   frameCount = 0;
   lastDistance = null;
+  nearCounter = 0;
   pauseCounter = 0;
 };
 
 const dist = (a, b) =>
   Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 
-export function analyze(results, previousLandmarks) {
+export function analyze(results) {
   if (!results?.multiHandLandmarks || results.multiHandLandmarks.length !== 1) {
     reset();
     return { event: 'none' };
@@ -51,11 +53,11 @@ export function analyze(results, previousLandmarks) {
 
   const hand = results.multiHandLandmarks[0];
 
-  // ใช้ปลายนิ้วกลาง
+  // ใช้ปลายนิ้วกลาง (นิ่งกว่า index)
   const handPoint = hand[12];
 
-  // ตำแหน่งปาก (ค่าประมาณที่เสถียร)
-  const mouthPoint = { x: 0.5, y: 0.4, z: 0 };
+  // จุดปาก (ค่าประมาณ)
+  const mouthPoint = { x: 0.5, y: 0.42, z: 0 };
 
   const d = dist(handPoint, mouthPoint);
 
@@ -64,7 +66,7 @@ export function analyze(results, previousLandmarks) {
     return { event: 'none', previousLandmarks: hand };
   }
 
-  const velocity = d - lastDistance; // <0 = เข้า, >0 = ออก
+  const velocity = d - lastDistance;
   lastDistance = d;
 
   frameCount++;
@@ -75,22 +77,23 @@ export function analyze(results, previousLandmarks) {
 
   /* ---------- IDLE ---------- */
   if (state === 'idle') {
+    // ต้องเข้าใกล้ + มีแนวโน้มเข้า
     if (d < CONFIG.NEAR_DISTANCE && velocity < CONFIG.IN_VELOCITY) {
-      state = 'in';
-      return {
-        event: 'progress',
-        previousLandmarks: hand,
-        debug: { state: 'in', velocity, d, biteCount },
-      };
+      nearCounter++;
+      if (nearCounter >= CONFIG.HOLD_NEAR_FRAMES) {
+        state = 'near';
+      }
+    } else {
+      nearCounter = 0;
     }
 
     return { event: 'none', previousLandmarks: hand };
   }
 
-  /* ---------- IN ---------- */
-  if (state === 'in') {
-    // ชะลอ = pause (เหมือนแตะปาก)
-    if (Math.abs(velocity) < 0.001) {
+  /* ---------- NEAR (ค้างใกล้ปาก) ---------- */
+  if (state === 'near') {
+    // ชะลอจริง = pause
+    if (Math.abs(velocity) < 0.0015) {
       pauseCounter++;
       if (pauseCounter >= CONFIG.PAUSE_FRAMES) {
         state = 'pause';
@@ -100,7 +103,7 @@ export function analyze(results, previousLandmarks) {
     return {
       event: 'progress',
       previousLandmarks: hand,
-      debug: { state: 'in', velocity, d, pauseCounter },
+      debug: { state: 'near', d, velocity, nearCounter },
     };
   }
 
@@ -114,7 +117,7 @@ export function analyze(results, previousLandmarks) {
     return {
       event: 'progress',
       previousLandmarks: hand,
-      debug: { state: 'pause', velocity, d },
+      debug: { state: 'pause', velocity },
     };
   }
 
@@ -132,8 +135,9 @@ export function analyze(results, previousLandmarks) {
       };
     }
 
-    // รอ bite รอบถัดไป
+    // เตรียม bite รอบถัดไป
     state = 'idle';
+    nearCounter = 0;
     pauseCounter = 0;
 
     return {
@@ -145,4 +149,3 @@ export function analyze(results, previousLandmarks) {
 
   return { event: 'none', previousLandmarks: hand };
 }
-

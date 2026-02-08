@@ -1,80 +1,122 @@
 /**
- * Gesture: มี (Predictive Version)
- * ใช้พิกัด Y ของหลังมือ (Point 9) เป็นหลัก
+ * Gesture: มี (Have)
+ * HUMAN-NATURAL BASE
+ *
+ * Concept:
+ * - มือขวา กำหลวม
+ * - นิ้วโป้งชี้ขึ้นเด่น
+ * - นิ้วอื่นงอ (ไม่แบ)
+ * - มืออยู่ใกล้หน้าอกด้านขวา
+ * - ค้างท่า = intent
+ *
+ * Type:
+ * - hand-shape-based + position-based
+ * - movement เป็น secondary
  */
 
 const CONFIG = {
-  // ระยะเคลื่อนที่ลงที่ถือว่า "เริ่มทำท่า" (0.01 = นิดเดียว)
-  START_MOVE: 0.01,
-  // ระยะเคลื่อนที่ลงที่ถือว่า "จบชื่อคำ" (0.05 = ประมาณ 1 ช่วงข้อมือ)
-  FINISH_MOVE: 0.05,
-  MAX_FRAMES: 40,
+  // chest zone (ค่าประมาณตำแหน่งอก)
+  CHEST_POINT: { x: 0.6, y: 0.55, z: 0 },
+
+  CHEST_DISTANCE: 0.2,
+
+  // รูปมือ
+  THUMB_UP_DIFF: 0.04, // thumb_tip ต้องสูงกว่า index_mcp
+
+  // ต้องค้างกี่เฟรม
+  HOLD_FRAMES: 4,
+
+  MAX_FRAMES: 60,
 };
 
-let state = 'idle'; 
-let startY = null;
+let state = 'idle'; // idle | shape_ok | hold
 let frameCount = 0;
+let holdCounter = 0;
 
 const reset = () => {
   state = 'idle';
-  startY = null;
   frameCount = 0;
+  holdCounter = 0;
 };
 
-export function analyze(results, previousLandmarks) {
+const dist = (a, b) =>
+  Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+export function analyze(results) {
   if (!results?.multiHandLandmarks || results.multiHandLandmarks.length !== 1) {
     reset();
     return { event: 'none' };
   }
 
   const hand = results.multiHandLandmarks[0];
-  const currentY = hand[9].y; // หลังมือ
 
-  if (!startY) {
-    startY = currentY;
-    return { event: 'none', previousLandmarks: hand };
-  }
+  const wrist = hand[0];
+  const thumbTip = hand[4];
+  const thumbIP = hand[3];
+  const indexMCP = hand[5];
 
   frameCount++;
-  const diffY = currentY - startY; // ค่าเป็นบวกคือเคลื่อนที่ลง
-
   if (frameCount > CONFIG.MAX_FRAMES) {
     reset();
     return { event: 'none', previousLandmarks: hand };
   }
 
+  /* ---------- รูปมือ: กำหลวม + thumb up ---------- */
+  const isThumbUp =
+    thumbTip.y < indexMCP.y - CONFIG.THUMB_UP_DIFF;
+
+  const fingersCurled =
+    hand[8].y > indexMCP.y &&   // index_tip
+    hand[12].y > indexMCP.y && // middle_tip
+    hand[16].y > indexMCP.y && // ring_tip
+    hand[20].y > indexMCP.y;   // pinky_tip
+
+  const isHandShapeOK = isThumbUp && fingersCurled;
+
+  /* ---------- ตำแหน่งใกล้อก ---------- */
+  const dChest = dist(wrist, CONFIG.CHEST_POINT);
+  const isNearChest = dChest < CONFIG.CHEST_DISTANCE;
+
   /* ---------- IDLE ---------- */
   if (state === 'idle') {
-    // ถ้าเริ่มขยับมือลงนิดเดียว ให้ส่ง progress เพื่อให้ Engine เปลี่ยนเป็น tracking
-    if (diffY > CONFIG.START_MOVE) {
-      state = 'tracking';
-      return { 
-        event: 'progress', 
-        previousLandmarks: hand,
-        debug: { diffY } 
-      };
+    if (isHandShapeOK && isNearChest) {
+      state = 'shape_ok';
     }
+    return { event: 'none', previousLandmarks: hand };
   }
 
-  /* ---------- TRACKING ---------- */
-  if (state === 'tracking') {
-    // ถ้าเลื่อนลงมาถึงระยะที่กำหนด ให้ส่ง finished
-    if (diffY > CONFIG.FINISH_MOVE) {
-      reset();
-      return {
-        event: 'finished',
-        word: 'มี',
-        previousLandmarks: hand,
-        debug: { totalDist: diffY }
-      };
-    }
-
-    // ถ้ามือขยับขึ้น (ย้อนกลับ) ให้ Reset กันพลาด
-    if (diffY < -0.02) {
+  /* ---------- SHAPE OK ---------- */
+  if (state === 'shape_ok') {
+    if (isHandShapeOK && isNearChest) {
+      holdCounter++;
+      if (holdCounter >= CONFIG.HOLD_FRAMES) {
+        state = 'hold';
+      }
+    } else {
       reset();
     }
 
-    return { event: 'progress', previousLandmarks: hand };
+    return {
+      event: 'progress',
+      previousLandmarks: hand,
+      debug: {
+        state: 'shape_ok',
+        isThumbUp,
+        fingersCurled,
+        dChest,
+        holdCounter,
+      },
+    };
+  }
+
+  /* ---------- HOLD ---------- */
+  if (state === 'hold') {
+    reset();
+    return {
+      event: 'finished',
+      word: 'มี',
+      previousLandmarks: hand,
+    };
   }
 
   return { event: 'none', previousLandmarks: hand };

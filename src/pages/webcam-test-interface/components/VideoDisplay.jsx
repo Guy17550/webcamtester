@@ -1,15 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
 import { analyzeGesture } from "../gesture/gestureEngine";
 
-// sentence layer
+// 🔹 sentence layer (SINGLE SOURCE OF TRUTH)
 import {
   acceptWord,
+  getSentenceState,
   resetSentence,
   undoLastWord,
   pauseSentence,
   resumeSentence,
   confirmSentence,
-  getSentenceState,
 } from "../gesture/sentenceEngine";
 
 const COOLDOWN_MS = 400;
@@ -24,41 +24,40 @@ const VideoDisplay = ({ videoRef, isActive }) => {
   // UI state
   const [detectedWord, setDetectedWord] = useState("");
   const [gestureStatus, setGestureStatus] = useState("กำลังตรวจจับ...");
-  const [sentenceState, setSentenceState] = useState(getSentenceState());
+  const [sentenceText, setSentenceText] = useState("");
   const [isPaused, setIsPaused] = useState(false);
   const [isConfirmed, setIsConfirmed] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
 
-  /* =====================
-     SPEAK SENTENCE
-  ===================== */
+  /* =========================
+     🔊 TEXT TO SPEECH
+  ========================= */
   const speakSentence = () => {
-    if (!sentenceState.formatted) return;
-    const utterance = new SpeechSynthesisUtterance(sentenceState.formatted);
+    if (!sentenceText) return;
+
+    const utterance = new SpeechSynthesisUtterance(sentenceText);
     utterance.lang = "th-TH";
     utterance.rate = 0.9;
+    utterance.pitch = 1.0;
+
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   };
 
-  /* =====================
-     CAMERA + GESTURE LOOP
-  ===================== */
+  /* =====================================================
+     1️⃣ CREATE MEDIAPIPE HANDS (ONCE ONLY)
+  ===================================================== */
   useEffect(() => {
-    if (!isActive || !videoRef?.current) return;
-
-    const video = videoRef.current;
     const canvas = canvasRef.current;
+    if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
 
-    const syncCanvas = () => {
-      if (!video.videoWidth) return;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    };
-
     const drawHand = (hand) => {
-      ctx.fillStyle = "#38bdf8";
+      ctx.fillStyle = "#00ff00";
+      ctx.strokeStyle = "#00ff00";
+      ctx.lineWidth = 2;
+
       hand.forEach((p) => {
         ctx.beginPath();
         ctx.arc(
@@ -98,7 +97,8 @@ const VideoDisplay = ({ videoRef, isActive }) => {
 
         if (result?.detectedWord && !isPaused && !isConfirmed) {
           acceptWord(result.detectedWord);
-          setSentenceState(getSentenceState());
+          const sentenceState = getSentenceState();
+          setSentenceText(sentenceState.formatted);
           setDetectedWord(result.detectedWord);
           cooldownUntilRef.current = Date.now() + COOLDOWN_MS;
         }
@@ -122,10 +122,31 @@ const VideoDisplay = ({ videoRef, isActive }) => {
     hands.onResults(onResults);
     handsRef.current = hands;
 
+    return () => {
+      hands.close();
+      handsRef.current = null;
+    };
+  }, []); // ✅ สำคัญ: dependency ว่าง
+
+  /* =====================================================
+     2️⃣ CAMERA LOOP (CONTROLLED BY isActive)
+  ===================================================== */
+  useEffect(() => {
+    if (!isActive || !videoRef?.current || !handsRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    const syncCanvas = () => {
+      if (!video.videoWidth) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    };
+
     const loop = async () => {
       if (video.readyState >= 2) {
         syncCanvas();
-        await hands.send({ image: video });
+        await handsRef.current.send({ image: video });
       }
       rafRef.current = requestAnimationFrame(loop);
     };
@@ -134,67 +155,45 @@ const VideoDisplay = ({ videoRef, isActive }) => {
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      if (handsRef.current) handsRef.current.close();
     };
-  }, [isActive, videoRef, isPaused, isConfirmed]);
+  }, [isActive, videoRef]);
 
-  /* =====================
+  /* =========================
      UI
-  ===================== */
+  ========================= */
   return (
-    <div className="relative h-screen bg-gradient-to-b from-blue-900 to-blue-800 text-white flex flex-col">
-      
-      {/* CAMERA (compact for mobile) */}
-      <div className="relative w-full h-[220px] md:h-[360px] overflow-hidden">
+    <div>
+      <div className="relative">
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
-          className="w-full h-full object-cover"
+          className="w-full"
         />
         <canvas
           ref={canvasRef}
-          className="absolute inset-0"
+          className="absolute top-0 left-0 w-full h-full"
           style={{ pointerEvents: "none" }}
         />
       </div>
 
-      {/* CONTENT */}
-      <div className="flex-1 px-4 py-3 overflow-y-auto pb-28">
-        <div className="text-sm text-blue-200">
-          สถานะ: <b>{gestureStatus}</b>
-        </div>
-
-        <div className="text-4xl font-bold text-cyan-300 mt-3">
-          {detectedWord || "—"}
-        </div>
-
-        {/* Sentence bubbles */}
-        <div className="mt-5 flex flex-wrap gap-2">
-          {sentenceState.sentence.length === 0 && (
-            <span className="opacity-50">ยังไม่มีคำ</span>
-          )}
-          {sentenceState.sentence.map((word, idx) => (
-            <span
-              key={idx}
-              className={`px-3 py-1 rounded-full text-sm font-semibold
-                ${
-                  idx === sentenceState.sentence.length - 1
-                    ? "bg-cyan-500 text-black shadow-lg shadow-cyan-400/50"
-                    : "bg-blue-700"
-                }`}
-            >
-              {word}
-            </span>
-          ))}
-        </div>
+      <div className="mt-3 text-sm">
+        สถานะ: <b>{gestureStatus}</b>
       </div>
 
-      {/* BOTTOM BAR */}
-      <div className="fixed bottom-0 left-0 right-0 bg-blue-950/95 border-t border-blue-700 px-3 py-3 flex gap-2 justify-between">
+      <div className="text-4xl font-bold mt-4 text-green-600">
+        {detectedWord || "—"}
+      </div>
+
+      <div className="text-xl mt-4">
+        ประโยค: <b>{sentenceText || "—"}</b>
+      </div>
+
+      {/* CONTROLS */}
+      <div className="mt-4 flex gap-2 flex-wrap">
         <button
-          className="px-3 py-2 bg-yellow-500 text-black rounded"
+          className="px-4 py-2 bg-yellow-500 text-white rounded"
           onClick={() => {
             if (isPaused) {
               resumeSentence();
@@ -209,25 +208,17 @@ const VideoDisplay = ({ videoRef, isActive }) => {
         </button>
 
         <button
-          className="px-3 py-2 bg-blue-500 rounded"
+          className="px-4 py-2 bg-blue-500 text-white rounded"
           onClick={() => {
             undoLastWord();
-            setSentenceState(getSentenceState());
+            setSentenceText(getSentenceState().formatted);
           }}
         >
-          Undo
+          Undo คำล่าสุด
         </button>
 
         <button
-          className="px-3 py-2 bg-purple-600 rounded"
-          onClick={speakSentence}
-          disabled={!sentenceState.formatted}
-        >
-          🔊
-        </button>
-
-        <button
-          className="px-4 py-2 bg-green-600 rounded font-bold"
+          className="px-4 py-2 bg-green-600 text-white rounded"
           onClick={() => {
             const result = confirmSentence();
             if (result.confirmed) {
@@ -236,25 +227,32 @@ const VideoDisplay = ({ videoRef, isActive }) => {
             }
           }}
         >
-          Confirm
+          ยืนยันประโยค
         </button>
 
         <button
-          className="px-3 py-2 bg-red-600 rounded"
+          className="px-4 py-2 bg-red-500 text-white rounded"
           onClick={() => {
             resetSentence();
-            setSentenceState(getSentenceState());
+            setSentenceText("");
             setIsPaused(false);
             setIsConfirmed(false);
           }}
         >
-          Reset
+          ลบคำทั้งหมด
+        </button>
+
+        <button
+          className="px-4 py-2 bg-purple-600 text-white rounded"
+          onClick={speakSentence}
+          disabled={!sentenceText}
+        >
+          🔊 อ่านประโยค
         </button>
       </div>
 
-      {/* DEBUG */}
       {debugInfo && (
-        <pre className="absolute top-2 right-2 text-xs bg-black/50 p-2 rounded max-w-xs overflow-auto">
+        <pre className="mt-3 text-xs bg-gray-100 p-2 rounded">
           {JSON.stringify(debugInfo, null, 2)}
         </pre>
       )}
