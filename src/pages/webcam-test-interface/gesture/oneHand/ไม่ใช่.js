@@ -1,157 +1,201 @@
 /**
- * Gesture: ไม่ใช่ (No / Incorrect)
+ * Gesture: ไม่ใช่ (STRICT VERSION)
  *
- * Pattern:
- * - Open palm facing camera
- * - Side-to-side shake (short range)
- * - 1–2 rounds only
- *
- * Type:
- * - direction-based ⭐
- * - hand-shape-based ⭐
- *
- * Anti-mistake:
- * - ไม่ใช่โบกกว้าง (สวัสดี)
- * - ไม่ใช่ผลักออก (ไม่เอา)
+ * Concept:
+ * - open palm
+ * - palm facing camera clearly
+ * - side-to-side shake (REAL 1 cycle)
+ * - short but intentional
+ * - reject noise / flick / other negations
  */
 
-const CONFIG = {
-  // hand shape
-  FLAT_VARIANCE: 0.03,          // นิ้วต้องอยู่ระนาบเดียวกัน
-  PALM_FACING_THRESHOLD: 0.5,   // ฝ่ามือหันเข้ากล้องพอสมควร
+const WORD = "ไม่ใช่";
 
-  // movement
-  SIDE_DISPLACEMENT_MIN: 0.08,  // ระยะส่ายขั้นต่ำ
-  SIDE_DISPLACEMENT_MAX: 0.22,  // กันโบกกว้างเกิน
-  REQUIRED_SHAKES: 1,           // อย่างน้อย 1 รอบ
-  MAX_SHAKES: 2,
+// =====================
+// Internal State
+// =====================
+let startTime = null;
+let lastWristX = null;
+let lastDirection = null;
+let directionChanges = 0;
 
-  // timing
-  MAX_FRAMES: 70,
-};
+let minX = null;
+let maxX = null;
 
-let state = 'idle';
-// idle → ready → shake → finish
+let lastTriggeredTime = 0;
 
-let frameCount = 0;
-let shakeCount = 0;
-let lastX = null;
-let direction = null; // 'left' | 'right'
+// =====================
+// Thresholds (STRICT)
+// =====================
+const MIN_DURATION = 250; // ms
+const MAX_DURATION = 900;
 
-const reset = () => {
-  state = 'idle';
-  frameCount = 0;
-  shakeCount = 0;
-  lastX = null;
-  direction = null;
-};
+const MIN_DIRECTION_CHANGES = 2; // L → R → L (1 full cycle)
 
-export function analyze(results) {
-  if (!results?.multiHandLandmarks || results.multiHandLandmarks.length !== 1) {
+const MIN_AMPLITUDE_RATIO = 0.1;  // shoulder width
+const MAX_AMPLITUDE_RATIO = 0.25;
+
+const PALM_DOT_THRESHOLD = 0.75;
+
+const COOLDOWN_MS = 800;
+
+// =====================
+// Helpers
+// =====================
+function reset() {
+  startTime = null;
+  lastWristX = null;
+  lastDirection = null;
+  directionChanges = 0;
+  minX = null;
+  maxX = null;
+}
+
+function isOpenPalm(landmarks) {
+  const tips = [8, 12, 16, 20]; // index → pinky tips
+  const mcps = [5, 9, 13, 17];
+
+  return tips.every((tip, i) => {
+    return landmarks[tip].y < landmarks[mcps[i]].y;
+  });
+}
+
+function palmFacingCamera(landmarks) {
+  const wrist = landmarks[0];
+  const indexMcp = landmarks[5];
+  const pinkyMcp = landmarks[17];
+
+  const vx1 = indexMcp.x - wrist.x;
+  const vy1 = indexMcp.y - wrist.y;
+  const vx2 = pinkyMcp.x - wrist.x;
+  const vy2 = pinkyMcp.y - wrist.y;
+
+  const normalZ = vx1 * vy2 - vy1 * vx2;
+  return Math.abs(normalZ) > PALM_DOT_THRESHOLD;
+}
+
+// =====================
+// Main Analyze
+// =====================
+export function analyze(results, previousLandmarks) {
+  if (!results?.multiHandLandmarks?.[0]) {
     reset();
-    return { event: 'none' };
+    return null;
   }
 
-  const hand = results.multiHandLandmarks[0];
+  const landmarks = results.multiHandLandmarks[0];
+  const now = Date.now();
 
-  const wrist = hand[0];
-  const indexTip = hand[8];
-  const middleTip = hand[12];
-  const ringTip = hand[16];
-  const pinkyTip = hand[20];
-
-  frameCount++;
-  if (frameCount > CONFIG.MAX_FRAMES) {
+  // Cooldown protection
+  if (now - lastTriggeredTime < COOLDOWN_MS) {
     reset();
-    return { event: 'none', previousLandmarks: hand };
+    return null;
   }
 
-  /* ---------- HAND SHAPE CHECK ---------- */
+  const wrist = landmarks[0];
+  const shoulder = results.poseLandmarks?.[12]; // right shoulder (proxy)
 
-  const maxY = Math.max(
-    indexTip.y,
-    middleTip.y,
-    ringTip.y,
-    pinkyTip.y
-  );
-  const minY = Math.min(
-    indexTip.y,
-    middleTip.y,
-    ringTip.y,
-    pinkyTip.y
-  );
-
-  const isFlatHand = (maxY - minY) < CONFIG.FLAT_VARIANCE;
-
-  /* ---------- PALM FACING CAMERA ---------- */
-  // ใช้ระยะ wrist → middle_tip เป็น proxy แบบง่าย
-  const palmFacingCamera =
-    Math.abs(middleTip.z - wrist.z) < CONFIG.PALM_FACING_THRESHOLD;
-
-  /* ---------- IDLE ---------- */
-  if (state === 'idle') {
-    if (isFlatHand && palmFacingCamera) {
-      state = 'ready';
-      lastX = wrist.x;
-    }
-    return { event: 'none', previousLandmarks: hand };
+  // =====================
+  // Shape validation
+  // =====================
+  if (!isOpenPalm(landmarks)) {
+    reset();
+    return null;
   }
 
-  /* ---------- READY ---------- */
-  if (state === 'ready') {
-    const dx = wrist.x - lastX;
+  if (!palmFacingCamera(landmarks)) {
+    reset();
+    return null;
+  }
 
-    if (Math.abs(dx) > CONFIG.SIDE_DISPLACEMENT_MIN) {
-      direction = dx > 0 ? 'right' : 'left';
-      state = 'shake';
+  // =====================
+  // Position validation (height lock)
+  // =====================
+  if (shoulder) {
+    const upper = shoulder.y - 0.25;
+    const lower = shoulder.y + 0.1;
+
+    if (wrist.y < upper || wrist.y > lower) {
+      reset();
+      return null;
     }
+  }
 
-    lastX = wrist.x;
-
+  // =====================
+  // Motion tracking
+  // =====================
+  if (!startTime) {
+    startTime = now;
+    lastWristX = wrist.x;
+    minX = wrist.x;
+    maxX = wrist.x;
     return {
-      event: 'progress',
-      previousLandmarks: hand,
-      debug: { state: 'ready' },
+      event: "progress",
+      word: WORD,
+      debug: { phase: "start" },
     };
   }
 
-  /* ---------- SHAKE ---------- */
-  if (state === 'shake') {
-    const dx = wrist.x - lastX;
+  const dx = wrist.x - lastWristX;
+  const direction = dx > 0 ? "right" : "left";
 
-    // กันโบกกว้าง (จะกลายเป็นสวัสดี)
-    if (Math.abs(dx) > CONFIG.SIDE_DISPLACEMENT_MAX) {
+  if (lastDirection && direction !== lastDirection) {
+    directionChanges++;
+  }
+
+  lastDirection = direction;
+  lastWristX = wrist.x;
+
+  minX = Math.min(minX, wrist.x);
+  maxX = Math.max(maxX, wrist.x);
+
+  const duration = now - startTime;
+
+  // =====================
+  // Finish check
+  // =====================
+  if (duration >= MIN_DURATION) {
+    const amplitude = Math.abs(maxX - minX);
+    const shoulderWidth = shoulder ? Math.abs(shoulder.x - results.poseLandmarks[11].x) : 1;
+
+    const ampRatio = amplitude / shoulderWidth;
+
+    const valid =
+      directionChanges >= MIN_DIRECTION_CHANGES &&
+      duration <= MAX_DURATION &&
+      ampRatio >= MIN_AMPLITUDE_RATIO &&
+      ampRatio <= MAX_AMPLITUDE_RATIO;
+
+    if (valid) {
+      lastTriggeredTime = now;
       reset();
-      return { event: 'none', previousLandmarks: hand };
-    }
 
-    if (dx !== 0) {
-      const newDir = dx > 0 ? 'right' : 'left';
-
-      if (newDir !== direction) {
-        shakeCount++;
-        direction = newDir;
-      }
-    }
-
-    lastX = wrist.x;
-
-    if (shakeCount >= CONFIG.REQUIRED_SHAKES &&
-        shakeCount <= CONFIG.MAX_SHAKES) {
-      reset();
       return {
-        event: 'finished',
-        word: 'ไม่ใช่',
-        previousLandmarks: hand,
+        event: "finished",
+        word: WORD,
+        debug: {
+          duration,
+          directionChanges,
+          ampRatio: ampRatio.toFixed(2),
+        },
       };
     }
-
-    return {
-      event: 'progress',
-      previousLandmarks: hand,
-      debug: { state: 'shake', shakeCount },
-    };
   }
 
-  return { event: 'none', previousLandmarks: hand };
+  // =====================
+  // Timeout → reset
+  // =====================
+  if (duration > MAX_DURATION) {
+    reset();
+    return null;
+  }
+
+  return {
+    event: "progress",
+    word: WORD,
+    debug: {
+      duration,
+      directionChanges,
+    },
+  };
 }

@@ -173,7 +173,7 @@ const VideoDisplay = ({ videoRef, isActive }) => {
         />
         <canvas
           ref={canvasRef}
-          className="absolute top-20 left-20 w-1440 h-720"
+          className="absolute top-0 left-0 w-full h-full"
           style={{ pointerEvents: "none" }}
         />
       </div>
