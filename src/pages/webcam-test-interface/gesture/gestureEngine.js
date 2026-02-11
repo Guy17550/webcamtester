@@ -6,22 +6,22 @@ import * as เข้าใจ from './oneHand/เข้าใจ.js';
 import * as ช้า from './oneHand/ช้า.js';
 import * as ใช่ from './oneHand/ใช่.js';
 import * as ถูก from './oneHand/ถูก.js';
-import * as ที่ไหน from './oneHand/ที่ไหน.js';
-import * as บ้าน from './oneHand/บ้าน.js';
-import * as ไป from './oneHand/ไป.js';
-import * as พรุ่งนี้ from './oneHand/พรุ่งนี้.js';
-import * as พูด from './oneHand/พูด.js';
-import * as มี from './oneHand/มี.js';
-import * as เมื่อวานนี้ from './oneHand/เมื่อวานนี้.js';
-import * as ไม่กิน from './oneHand/ไม่กิน.js';
-import * as ไม่ใช่ from './oneHand/ไม่ใช่.js';
-import * as ไม่ดี from './oneHand/ไม่ดี.js';
-import * as ไม่มี from './oneHand/ไม่มี.js';
-import * as ไม่อยาก from './oneHand/ไม่อยาก.js';
-import * as แย่มาก from './oneHand/แย่มาก.js';
-import * as ร้อน from './oneHand/ร้อน.js';
-import * as อยาก from './oneHand/อยาก.js';
-import * as อะไร from './oneHand/อะไร.js';
+//import * as ที่ไหน from './oneHand/ที่ไหน.js';
+//import * as บ้าน from './oneHand/บ้าน.js';
+//import * as ไป from './oneHand/ไป.js';
+//import * as พรุ่งนี้ from './oneHand/พรุ่งนี้.js';
+//import * as พูด from './oneHand/พูด.js';
+//import * as มี from './oneHand/มี.js';
+//import * as เมื่อวานนี้ from './oneHand/เมื่อวานนี้.js';
+//import * as ไม่กิน from './oneHand/ไม่กิน.js';
+//import * as ไม่ใช่ from './oneHand/ไม่ใช่.js';
+//import * as ไม่ดี from './oneHand/ไม่ดี.js';
+//import * as ไม่มี from './oneHand/ไม่มี.js';
+//import * as ไม่อยาก from './oneHand/ไม่อยาก.js';
+//import * as แย่มาก from './oneHand/แย่มาก.js';
+//import * as ร้อน from './oneHand/ร้อน.js';
+//import * as อยาก from './oneHand/อยาก.js';
+//import * as อะไร from './oneHand/อะไร.js';
 
 
 
@@ -39,7 +39,7 @@ import * as อะไร from './oneHand/อะไร.js';
 
 const gestures = [
   // A: velocity-based
-  อะไร,
+ อะไร,
 
   // B: compound / sequence
   ไม่กิน,
